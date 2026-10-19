@@ -1,26 +1,31 @@
 @import "tailwindcss";
 
+/* MTA rail control center: a dark-only design. */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  color-scheme: dark;
+  --background: #0d0d0c;
+  --foreground: #ffffff;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --color-panel: #1a1a19;
+  --color-panel-2: #242422;
+  --color-edge: #34342f;
+  --color-ink-2: #c3c2b7;
+  --color-ink-3: #8f8e85;
+  --color-mta-red: #ee352e;
+  --color-mta-yellow: #fccc0a;
+  --color-mta-green: #00933c;
+  --color-mta-blue: #0039a6;
+  --color-mta-orange: #ff6319;
+  --font-sans: "Helvetica Neue", Helvetica, Arial, var(--font-geist-sans), sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
 }
