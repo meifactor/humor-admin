@@ -2,13 +2,14 @@ import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { ConfirmButton } from "@/components/confirm-button";
 import { panelClass } from "@/components/ui";
 import { requireSuperadmin } from "@/lib/admin";
 import { formatDateTime } from "@/lib/format";
 import { REACTIONS } from "@/lib/reactions";
 import { fullName, uploadUrl } from "@/lib/storage";
 import { deleteCaption, deleteGeneration } from "../actions";
-import { CaptionEditor, ConfirmButton, GenerationForm } from "./editors";
+import { CaptionEditor, GenerationForm } from "./editors";
 
 export const metadata: Metadata = { title: "Edit media · Control Center" };
 

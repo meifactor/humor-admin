@@ -8,8 +8,19 @@ It uses the same Supabase database and Google sign-in.
   AI health (top creators and reactors, busiest hours, which Gemini model wrote captions).
 - **Media:** create (upload + Gemini), read, update (context, vibe, caption text) and delete
   AI-generated photos and captions.
+- **Images:** upload, view, replace and delete photos in Supabase Storage.
 - **Users:** read every account, with sign-up and sign-in dates and activity counts.
 - **Ratings:** read every reaction, filterable by type.
+- **Prompt chains:** read each chain and its steps; read/update the chain mix (how often each
+  chain is picked). Captions are written by a chain such as "describe the photo → write captions".
+- **Terms / AI generation examples:** create, read, update and delete the local terms and
+  example captions that are mixed into every prompt.
+- **LLM models / providers:** create, read, update and delete the models the pipeline tries
+  (in priority order, with automatic fallback) and their providers.
+- **Generation requests / LLM responses:** read every caption attempt and every AI call it
+  made: prompt, response, model, latency and errors, plus per-model success rates.
+- **Signup domains / whitelisted emails:** create, read, update and delete who may create an
+  account in the main app. Enforced by a database trigger on `auth.users`.
 
 ## Who can get in
 
@@ -38,8 +49,8 @@ where id = (select id from auth.users where email = 'YOUR_EMAIL@gmail.com');
 
 ## Setup
 
-1. Run `supabase/admin.sql` in the Supabase SQL Editor (after the main app's SQL files),
-   then the bootstrap query above.
+1. Run `supabase/admin.sql` and then `supabase/observability.sql` in the Supabase SQL Editor
+   (after the main app's SQL files), then the bootstrap query above.
 2. Create `.env.local`:
    ```
    NEXT_PUBLIC_SUPABASE_URL=...

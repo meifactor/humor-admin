@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireSuperadmin } from "@/lib/admin";
 import { UPLOADS_BUCKET } from "@/lib/buckets";
-import { buildCaptionPrompt, generateCaptions } from "@/lib/gemini";
+import { finishRequest, runCaptionPipeline } from "@/lib/caption-pipeline";
 import { isVibeId } from "@/lib/vibes";
 
 export type FormState = { status: "idle" | "success" | "error"; message?: string };
@@ -45,13 +45,18 @@ export async function createGeneration(path: string, rawContext: string, vibe: s
     return { status: "error", message: "We couldn't read the photo. Please upload it again." };
   }
 
-  const prompt = buildCaptionPrompt(context, vibe);
-  let result: Awaited<ReturnType<typeof generateCaptions>>;
+  // Runs the prompt chain and logs the request through the admin's own session (RLS).
+  let result: Awaited<ReturnType<typeof runCaptionPipeline>>;
   try {
-    result = await generateCaptions(
-      { base64: Buffer.from(await file.arrayBuffer()).toString("base64"), mimeType: MIME_TYPES[match[1]] },
-      prompt,
-    );
+    result = await runCaptionPipeline({
+      db: supabase,
+      image: { base64: Buffer.from(await file.arrayBuffer()).toString("base64"), mimeType: MIME_TYPES[match[1]] },
+      vibe,
+      context,
+      userId: user.id,
+      imagePath: path,
+      source: "admin",
+    });
   } catch (error) {
     console.error("Caption generation failed", error);
     await removeUpload();
@@ -61,12 +66,16 @@ export async function createGeneration(path: string, rawContext: string, vibe: s
   // Superadmins may insert generations and captions directly (RLS policies in admin.sql).
   const { data: generation, error: generationError } = await supabase
     .from("generations")
-    .insert({ user_id: user.id, image_path: path, context, vibe, prompt, model: result.model })
+    .insert({ user_id: user.id, image_path: path, context, vibe, prompt: result.prompt, model: result.model })
     .select("id")
     .single<{ id: string }>();
 
   if (generationError || !generation) {
     console.error("Saving generation failed", generationError);
+    await finishRequest(supabase, result.requestId, result.started, {
+      status: "failed",
+      error: `Saving generation failed: ${generationError?.message}`,
+    });
     await removeUpload();
     return { status: "error", message: "Couldn't save the generation." };
   }
@@ -78,9 +87,18 @@ export async function createGeneration(path: string, rawContext: string, vibe: s
   if (captionsError) {
     console.error("Saving captions failed", captionsError);
     await supabase.from("generations").delete().eq("id", generation.id);
+    await finishRequest(supabase, result.requestId, result.started, {
+      status: "failed",
+      error: `Saving captions failed: ${captionsError.message}`,
+    });
     await removeUpload();
     return { status: "error", message: "Couldn't save the captions." };
   }
+
+  await finishRequest(supabase, result.requestId, result.started, {
+    status: "succeeded",
+    generationId: generation.id,
+  });
 
   revalidatePath("/", "layout");
   redirect(`/media/${generation.id}`);

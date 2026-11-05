@@ -1,8 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
-import { useFormStatus } from "react-dom";
-import { dangerButtonClass, inputClass, labelClass, secondaryButtonClass } from "@/components/ui";
+import { inputClass, labelClass, secondaryButtonClass } from "@/components/ui";
 import { VIBES } from "@/lib/vibes";
 import { updateCaption, updateGeneration, type FormState } from "../actions";
 
@@ -70,22 +69,5 @@ export function CaptionEditor({ id, text }: { id: string; text: string }) {
         <StatusMessage state={state} />
       </div>
     </form>
-  );
-}
-
-// A submit button that asks for confirmation first.
-export function ConfirmButton({ label, confirmText, compact = false }: { label: string; confirmText: string; compact?: boolean }) {
-  const { pending } = useFormStatus();
-  return (
-    <button
-      type="submit"
-      disabled={pending}
-      onClick={(event) => {
-        if (!window.confirm(confirmText)) event.preventDefault();
-      }}
-      className={`${dangerButtonClass} ${compact ? "px-3 py-1" : ""}`}
-    >
-      {pending ? "Deleting…" : label}
-    </button>
   );
 }
