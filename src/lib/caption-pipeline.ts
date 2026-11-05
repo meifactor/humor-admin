@@ -163,11 +163,11 @@ function errorMessage(error: unknown) {
 }
 
 export class CaptionPipelineError extends Error {
-  constructor(
-    message: string,
-    readonly requestId: string | null,
-  ) {
+  readonly requestId: string | null;
+
+  constructor(message: string, requestId: string | null) {
     super(message);
+    this.requestId = requestId;
   }
 }
 
