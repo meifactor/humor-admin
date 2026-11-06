@@ -72,12 +72,15 @@ type PipelineConfig = {
   examples: { vibe: string | null; scene: string; caption: string }[];
 };
 
-async function loadConfig(db: SupabaseClient): Promise<PipelineConfig> {
+// With `chainId`, loads just that chain (even if inactive or weighted 0, for testing);
+// otherwise every active chain, for a weighted random pick.
+async function loadConfig(db: SupabaseClient, chainId?: string): Promise<PipelineConfig> {
+  const chainQuery = db
+    .from("prompt_chains")
+    .select("id, name, prompt_chain_mix(weight), prompt_chain_steps(position, name, template, output_format, uses_image)");
+
   const [chains, models, terms, examples] = await Promise.all([
-    db
-      .from("prompt_chains")
-      .select("id, name, prompt_chain_mix(weight), prompt_chain_steps(position, name, template, output_format, uses_image)")
-      .eq("is_active", true),
+    chainId ? chainQuery.eq("id", chainId) : chainQuery.eq("is_active", true),
     db
       .from("llm_models")
       .select("model_id, timeout_ms, priority, llm_providers!inner(slug, is_active)")
@@ -103,8 +106,8 @@ async function loadConfig(db: SupabaseClient): Promise<PipelineConfig> {
       weight: c.prompt_chain_mix?.weight ?? 0,
       steps: [...c.prompt_chain_steps].sort((a, b) => a.position - b.position),
     }))
-    // A usable chain has a weight and ends with a step that writes captions.
-    .filter((c) => c.weight > 0 && c.steps.at(-1)?.output_format === "captions");
+    // A usable chain ends with a step that writes captions (and, unless forced, has a weight).
+    .filter((c) => (chainId || c.weight > 0) && c.steps.at(-1)?.output_format === "captions");
 
   // The pipeline only knows how to call Google's Gemini API.
   const loadedModels = ((models.data as ModelRow[] | null) ?? [])
@@ -116,7 +119,7 @@ async function loadConfig(db: SupabaseClient): Promise<PipelineConfig> {
   }
 
   return {
-    chains: loadedChains.length ? loadedChains : [DEFAULT_CHAIN],
+    chains: loadedChains.length || chainId ? loadedChains : [DEFAULT_CHAIN],
     models: loadedModels.length ? loadedModels : DEFAULT_MODELS,
     terms: terms.data ?? [],
     examples: examples.data ?? [],
@@ -173,23 +176,33 @@ export class CaptionPipelineError extends Error {
 
 type RunOptions = {
   // Supabase client that can read the config and write the logs: the service role in the
-  // main app, a superadmin's session in the admin area.
+  // main app, a superadmin's session in the admin area and prompt chain tool.
   db: SupabaseClient;
   image: { base64: string; mimeType: string };
   vibe: VibeId;
   context: string | null;
   userId: string;
   imagePath: string;
-  source: "app" | "admin";
+  source: "app" | "admin" | "tool";
+  // Run this chain instead of picking one by the mix weights.
+  chainId?: string;
 };
 
-export async function runCaptionPipeline({ db, image, vibe, context, userId, imagePath, source }: RunOptions) {
+export type StepResult = { position: number; name: string; model: string; output: string; latencyMs: number };
+
+export async function runCaptionPipeline({ db, image, vibe, context, userId, imagePath, source, chainId }: RunOptions) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     throw new CaptionPipelineError("Missing GEMINI_API_KEY environment variable", null);
   }
 
-  const config = await loadConfig(db);
+  const config = await loadConfig(db, chainId);
+  if (config.chains.length === 0) {
+    throw new CaptionPipelineError(
+      "That prompt chain can't run: it needs at least one step, and its last step must output captions.",
+      null,
+    );
+  }
   const chain = pickChain(config.chains);
   const started = Date.now();
   const deadline = started + TOTAL_BUDGET_MS;
@@ -220,6 +233,7 @@ export async function runCaptionPipeline({ db, image, vibe, context, userId, ima
 
   const ai = new GoogleGenAI({ apiKey });
   const prompts: string[] = [];
+  const steps: StepResult[] = [];
   let captions: string[] | null = null;
   let finalModel = "";
 
@@ -229,9 +243,11 @@ export async function runCaptionPipeline({ db, image, vibe, context, userId, ima
       prompts.push(`## Step ${step.position}: ${step.name}\n${prompt}`);
       const output = await runStep({ ai, db, requestId, step, prompt, image, models: config.models, deadline });
       finalModel = output.model;
+      steps.push({ position: step.position, name: step.name, model: output.model, output: output.text, latencyMs: output.latencyMs });
 
       if (step.output_format === "captions") {
         captions = parseCaptions(output.text);
+        vars.previous_output = captions.join("\n");
       } else {
         vars.previous_output = output.text.trim();
       }
@@ -244,7 +260,7 @@ export async function runCaptionPipeline({ db, image, vibe, context, userId, ima
     throw new CaptionPipelineError(errorMessage(error), requestId);
   }
 
-  return { captions, model: finalModel, prompt: prompts.join("\n\n"), requestId, started };
+  return { captions, model: finalModel, prompt: prompts.join("\n\n"), requestId, started, chainName: chain.name, steps };
 }
 
 async function runStep({
@@ -298,7 +314,7 @@ async function runStep({
         response_text: text,
         latency_ms: Date.now() - attemptStarted,
       });
-      return { text, model: response.modelVersion ?? model.model_id };
+      return { text, model: response.modelVersion ?? model.model_id, latencyMs: Date.now() - attemptStarted };
     } catch (error) {
       lastError = error;
       await logResponse(db, {
